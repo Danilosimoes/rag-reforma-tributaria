@@ -163,7 +163,31 @@ streamlit run app.py
 Se você rodar `streamlit run app.py` antes do passo 3, a interface mostra um aviso
 amigável pedindo para rodar a indexação primeiro, em vez de quebrar com um traceback.
 
-## 8. Exemplos de uso (validados)
+## 8. Fontes indexadas
+
+Configuráveis em `src/config/urls_oficiais.py` (web) e `data/documentos/` (locais). Estado
+atual do índice (`data/faiss_index/`, gerado por `python -m scripts.ingest`):
+
+**Total: 3159 vetores** (chunks de `settings.CHUNK_SIZE=1000` caracteres, overlap 150).
+
+| Fonte | Tipo | Status |
+|---|---|---|
+| LC 214/2025 (institui IBS, CBS, IS) | Planalto (web) | ✅ indexada |
+| LC 227/2026 (altera a LC 214) | Planalto (web) | ✅ indexada |
+| Decreto 12.955/2026 (regulamento da CBS, 620 artigos) | Planalto (web) | ✅ indexada |
+| Página da Reforma Tributária — Ministério da Fazenda | gov.br (web) | ✅ indexada |
+| Orientações 2026 — Receita Federal (novos modelos de DF-e) | gov.br (web) | ❌ **URL retorna HTTP 404** — não entrou no índice |
+| Cartilha da Reforma Tributária — Observatório FIESP (62 págs.) | PDF local | ✅ indexada |
+| Reforma Tributária — Schneider Pugliese, março/2026 (8 págs.) | PDF local | ✅ indexada |
+
+A URL das "Orientações 2026" da Receita Federal (fornecida na Fase 9) aponta para uma página
+que não existe mais nesse endereço — confirmado por `curl` (HTTP 404, corpo
+`{"error_type": "NotFound"}`). O sistema de ingestão detecta isso corretamente (ver Seção 11
+sobre o fix de `raise_for_status`) e reporta a falha de forma visível no log de
+`scripts.ingest`, em vez de indexar o corpo do erro como se fosse conteúdo real. A URL
+permanece na lista — corrigir o endereço (ou remover a entrada) é uma tarefa futura.
+
+## 9. Exemplos de uso (validados)
 
 **Resposta fundamentada** — pergunta: *"O que é o Imposto Seletivo?"*
 
@@ -205,7 +229,16 @@ que o **retriever** de fato trouxe, não em conhecimento geral do modelo — e q
 traz mais chance de contexto relevante, ao custo de mais tokens (e portanto custo/latência)
 por pergunta.
 
-## 9. Guardrails
+**`TOP_K` permanece em 4 (testado, não alterado).** Na Fase 9, com o índice já em 3159
+vetores, uma pergunta sobre os "pontos de atenção" da cartilha da FIESP (documento de 62
+páginas) recebeu uma resposta que admitia contexto insuficiente. Repeti a mesma pergunta com
+`TOP_K=6` para comparar: a resposta continuou sem encontrar a informação — os 2 chunks
+extras recuperados eram sobre um assunto totalmente diferente (transição PIS/Cofins→CBS),
+não sobre os "pontos de atenção" da cartilha. Ou seja, aumentar `k` não ajudou nesse caso
+(a limitação era de relevância semântica do chunk certo, não de quantidade), só aumentou o
+custo por pergunta. Mantive `TOP_K=4` como default.
+
+## 10. Guardrails
 
 Como o agente trata de matéria tributária (um contador pode agir com base nas respostas),
 foram adicionados guardrails simples, sem introduzir componentes novos na arquitetura —
@@ -252,7 +285,7 @@ todos vivem no system prompt (`src/prompt/templates.py`) ou na interface (`app.p
   isso, **não implementei** esse guardrail — fica registrado como melhoria futura, caso um
   modelo de embeddings com melhor separação entre esses dois grupos seja adotado.
 
-## 10. Notas técnicas
+## 11. Notas técnicas
 
 - **Encoding ISO-8859-1 forçado para páginas do Planalto**: essas páginas não declaram
   charset no HTML e, sem forçar o encoding, o texto sai corrompido (`cÃ¡lculo` em vez de
@@ -282,8 +315,17 @@ todos vivem no system prompt (`src/prompt/templates.py`) ou na interface (`app.p
 - **`@st.cache_resource`** em `app.py`: garante que `RAGService()` — que carrega o índice
   FAISS e o modelo de embeddings — seja instanciado uma única vez por sessão do servidor
   Streamlit, não a cada pergunta.
+- **`raise_for_status=True` no `WebBaseLoader`**: sem isso, uma resposta HTTP de erro (ex.:
+  404) não gera exceção — o `WebBaseLoader` aceita o corpo da resposta como "conteúdo" da
+  página normalmente. Isso foi descoberto na Fase 9: a URL das Orientações 2026 da Receita
+  Federal retorna 404 com corpo `{"error_type": "NotFound"}`, e esse texto estava sendo
+  indexado como se fosse um trecho real do documento, sob a fonte
+  `.../orientacoes-2026` — um erro silencioso que passava despercebido pelo log de
+  ingestão (que só verificava se *algum* chunk daquela URL existia, não se o conteúdo fazia
+  sentido). Com `raise_for_status=True`, a resposta de erro vira exceção, tratada pelo
+  mesmo retry/log de falha já existente em `src/ingestion/loaders.py`.
 
-## 11. Limitações e melhorias futuras
+## 12. Limitações e melhorias futuras
 
 - A base de conhecimento está restrita às fontes atualmente configuradas em
   `src/config/urls_oficiais.py` (LC 214/2025, LC 227/2026 e a página do Ministério da

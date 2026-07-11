@@ -83,6 +83,11 @@ def carregar_documentos_web() -> list[Document]:
                     encoding=encoding,
                     header_template=HEADERS_NAVEGADOR,
                     requests_kwargs={"timeout": settings.WEB_REQUEST_TIMEOUT_SEGUNDOS},
+                    # Sem isso, uma resposta 404/500 é aceita como "conteúdo" —
+                    # já vimos isso indexar o corpo JSON de erro de uma página
+                    # inexistente como se fosse texto da lei. Queremos que HTTP
+                    # de erro vire exceção, tratada pelo retry/log abaixo.
+                    raise_for_status=True,
                 )
                 docs = loader.load()
                 break
