@@ -1,0 +1,23 @@
+# Ambiente virtual
+venv/
+.venv/
+
+# Variáveis de ambiente / segredos
+.env
+
+# Índice FAISS gerado (reconstruível via scripts/ingest.py)
+data/faiss_index/
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+
+# Cache de modelos (sentence-transformers baixa localmente)
+.cache/
